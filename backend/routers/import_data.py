@@ -1,6 +1,7 @@
 import openpyxl
 from fastapi import APIRouter, UploadFile, File
 from datetime import datetime, timedelta
+from sqlalchemy import text
 from ..database import get_db
 
 router = APIRouter(prefix="/api/import", tags=["import"])
@@ -100,9 +101,13 @@ async def import_excel(file: UploadFile = File(...)):
 
         try:
             conn.execute(
-                """INSERT INTO time_entries (date, main_category, sub_category, note, start_time, end_time, duration_minutes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (date_str, main_cat, sub_cat, note, start_str, end_str, minutes)
+                text("""INSERT INTO time_entries (date, main_category, sub_category, note, start_time, end_time, duration_minutes)
+                       VALUES (:date, :main_cat, :sub_cat, :note, :start, :end, :dur)"""),
+                {
+                    "date": date_str, "main_cat": main_cat,
+                    "sub_cat": sub_cat, "note": note,
+                    "start": start_str, "end": end_str, "dur": minutes
+                }
             )
             imported += 1
         except Exception as e:

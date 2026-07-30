@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
+from sqlalchemy import text
 from ..database import get_db
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
@@ -19,10 +20,11 @@ class CategoryUpdate(BaseModel):
 @router.get("")
 def get_categories():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM categories ORDER BY sort_order, id").fetchall()
+    rows = conn.execute(
+        text("SELECT * FROM categories ORDER BY sort_order, id")
+    ).mappings().all()
     conn.close()
 
-    # 组织成树结构
     main_cats = {}
     sub_cats = {}
     for r in rows:
@@ -44,17 +46,23 @@ def get_categories():
 def create_category(cat: CategoryCreate):
     conn = get_db()
     if cat.parent_id:
-        parent = conn.execute("SELECT id FROM categories WHERE id = ?", (cat.parent_id,)).fetchone()
+        parent = conn.execute(
+            text("SELECT id FROM categories WHERE id = :pid"), {"pid": cat.parent_id}
+        ).fetchone()
         if not parent:
             conn.close()
             raise HTTPException(status_code=404, detail="父类不存在")
 
-    cur = conn.execute(
-        "INSERT INTO categories (name, parent_id) VALUES (?, ?)",
-        (cat.name, cat.parent_id)
+    result = conn.execute(
+        text("INSERT INTO categories (name, parent_id) VALUES (:name, :pid) RETURNING id"),
+        {"name": cat.name, "pid": cat.parent_id}
     )
+    new_id = result.scalar_one()
     conn.commit()
-    row = conn.execute("SELECT * FROM categories WHERE id = ?", (cur.lastrowid,)).fetchone()
+
+    row = conn.execute(
+        text("SELECT * FROM categories WHERE id = :id"), {"id": new_id}
+    ).mappings().fetchone()
     conn.close()
     return {"ok": True, "category": dict(row)}
 
@@ -62,17 +70,27 @@ def create_category(cat: CategoryCreate):
 @router.put("/{cat_id}")
 def update_category(cat_id: int, update: CategoryUpdate):
     conn = get_db()
-    existing = conn.execute("SELECT * FROM categories WHERE id = ?", (cat_id,)).fetchone()
+    existing = conn.execute(
+        text("SELECT * FROM categories WHERE id = :id"), {"id": cat_id}
+    ).fetchone()
     if not existing:
         conn.close()
         raise HTTPException(status_code=404, detail="类别不存在")
 
     if update.name is not None:
-        conn.execute("UPDATE categories SET name = ? WHERE id = ?", (update.name, cat_id))
+        conn.execute(
+            text("UPDATE categories SET name = :name WHERE id = :id"),
+            {"name": update.name, "id": cat_id}
+        )
     if update.sort_order is not None:
-        conn.execute("UPDATE categories SET sort_order = ? WHERE id = ?", (update.sort_order, cat_id))
+        conn.execute(
+            text("UPDATE categories SET sort_order = :so WHERE id = :id"),
+            {"so": update.sort_order, "id": cat_id}
+        )
     conn.commit()
-    row = conn.execute("SELECT * FROM categories WHERE id = ?", (cat_id,)).fetchone()
+    row = conn.execute(
+        text("SELECT * FROM categories WHERE id = :id"), {"id": cat_id}
+    ).mappings().fetchone()
     conn.close()
     return {"ok": True, "category": dict(row)}
 
@@ -80,8 +98,8 @@ def update_category(cat_id: int, update: CategoryUpdate):
 @router.delete("/{cat_id}")
 def delete_category(cat_id: int):
     conn = get_db()
-    conn.execute("DELETE FROM categories WHERE id = ?", (cat_id,))
-    conn.execute("DELETE FROM categories WHERE parent_id = ?", (cat_id,))
+    conn.execute(text("DELETE FROM categories WHERE id = :id"), {"id": cat_id})
+    conn.execute(text("DELETE FROM categories WHERE parent_id = :pid"), {"pid": cat_id})
     conn.commit()
     conn.close()
     return {"ok": True}

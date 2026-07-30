@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timedelta
+from sqlalchemy import text
 from ..database import get_db
 
 router = APIRouter(prefix="/api/entries", tags=["entries"])
@@ -26,7 +27,6 @@ class EntryUpdate(BaseModel):
 
 
 def calc_duration(start: str, end: str) -> float:
-    """计算持续时间（分钟）"""
     fmt = "%H:%M:%S" if start.count(":") == 2 else "%H:%M"
     s = datetime.strptime(start, fmt)
     e = datetime.strptime(end, fmt)
@@ -40,14 +40,11 @@ def get_monthly(year: int = Query(...), month: int = Query(...)):
     conn = get_db()
     prefix = f"{year}-{month:02d}"
     rows = conn.execute(
-        """SELECT * FROM time_entries
-           WHERE date LIKE ? || '%'
-           ORDER BY date, start_time""",
-        (prefix,)
-    ).fetchall()
+        text("SELECT * FROM time_entries WHERE date LIKE :prefix ORDER BY date, start_time"),
+        {"prefix": f"{prefix}%"}
+    ).mappings().all()
     conn.close()
 
-    # 按日期分组
     days = {}
     for r in rows:
         d = r["date"]
@@ -63,7 +60,6 @@ def get_monthly(year: int = Query(...), month: int = Query(...)):
             "duration_minutes": r["duration_minutes"],
         })
 
-    # 计算每日总时长和分类汇总
     result = []
     for date, entries in sorted(days.items()):
         total_minutes = sum(e["duration_minutes"] for e in entries)
@@ -85,9 +81,11 @@ def get_monthly(year: int = Query(...), month: int = Query(...)):
 def get_daily(date: str):
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM time_entries WHERE date = ? ORDER BY start_time", (date,)
-    ).fetchall()
+        text("SELECT * FROM time_entries WHERE date = :date ORDER BY start_time"),
+        {"date": date}
+    ).mappings().all()
     conn.close()
+
     entries = [dict(r) for r in rows]
     total_minutes = sum(r["duration_minutes"] for r in rows)
     return {"date": date, "total_minutes": round(total_minutes, 1), "entries": entries}
@@ -97,14 +95,23 @@ def get_daily(date: str):
 def create_entry(entry: EntryCreate):
     minutes = calc_duration(entry.start_time, entry.end_time)
     conn = get_db()
-    cur = conn.execute(
-        """INSERT INTO time_entries (date, main_category, sub_category, note, start_time, end_time, duration_minutes)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (entry.date, entry.main_category, entry.sub_category, entry.note,
-         entry.start_time, entry.end_time, minutes)
+
+    result = conn.execute(
+        text("""INSERT INTO time_entries (date, main_category, sub_category, note, start_time, end_time, duration_minutes)
+                VALUES (:date, :main_cat, :sub_cat, :note, :start, :end, :dur) RETURNING id"""),
+        {
+            "date": entry.date, "main_cat": entry.main_category,
+            "sub_cat": entry.sub_category, "note": entry.note,
+            "start": entry.start_time, "end": entry.end_time,
+            "dur": minutes
+        }
     )
+    new_id = result.scalar_one()
     conn.commit()
-    row = conn.execute("SELECT * FROM time_entries WHERE id = ?", (cur.lastrowid,)).fetchone()
+
+    row = conn.execute(
+        text("SELECT * FROM time_entries WHERE id = :id"), {"id": new_id}
+    ).mappings().fetchone()
     conn.close()
     return {"ok": True, "entry": dict(row)}
 
@@ -112,7 +119,9 @@ def create_entry(entry: EntryCreate):
 @router.put("/{entry_id}")
 def update_entry(entry_id: int, update: EntryUpdate):
     conn = get_db()
-    existing = conn.execute("SELECT * FROM time_entries WHERE id = ?", (entry_id,)).fetchone()
+    existing = conn.execute(
+        text("SELECT * FROM time_entries WHERE id = :id"), {"id": entry_id}
+    ).mappings().fetchone()
     if not existing:
         conn.close()
         raise HTTPException(status_code=404, detail="条目不存在")
@@ -129,12 +138,14 @@ def update_entry(entry_id: int, update: EntryUpdate):
         fields["duration_minutes"] = calc_duration(st, et)
 
     if fields:
-        sets = ", ".join(f"{k} = ?" for k in fields)
-        vals = list(fields.values()) + [entry_id]
-        conn.execute(f"UPDATE time_entries SET {sets} WHERE id = ?", vals)
+        set_clauses = ", ".join(f"{k} = :{k}" for k in fields)
+        params = {**fields, "id": entry_id}
+        conn.execute(text(f"UPDATE time_entries SET {set_clauses} WHERE id = :id"), params)
         conn.commit()
 
-    row = conn.execute("SELECT * FROM time_entries WHERE id = ?", (entry_id,)).fetchone()
+    row = conn.execute(
+        text("SELECT * FROM time_entries WHERE id = :id"), {"id": entry_id}
+    ).mappings().fetchone()
     conn.close()
     return {"ok": True, "entry": dict(row)}
 
@@ -142,7 +153,7 @@ def update_entry(entry_id: int, update: EntryUpdate):
 @router.delete("/{entry_id}")
 def delete_entry(entry_id: int):
     conn = get_db()
-    conn.execute("DELETE FROM time_entries WHERE id = ?", (entry_id,))
+    conn.execute(text("DELETE FROM time_entries WHERE id = :id"), {"id": entry_id})
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -151,7 +162,7 @@ def delete_entry(entry_id: int):
 @router.delete("")
 def clear_all():
     conn = get_db()
-    conn.execute("DELETE FROM time_entries")
+    conn.execute(text("DELETE FROM time_entries"))
     conn.commit()
     conn.close()
     return {"ok": True}
