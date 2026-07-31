@@ -6,6 +6,7 @@ import MonthlyView from './pages/MonthlyView'
 import AddEntry from './pages/AddEntry'
 import Categories from './pages/Categories'
 import ImportPage from './pages/ImportPage'
+import StatsPage from './pages/StatsPage'
 import { isLoggedIn, clearAuth, getUsername } from './api'
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/edit/:id" element={<AddEntry />} />
         <Route path="/categories" element={<Categories />} />
         <Route path="/import" element={<ImportPage />} />
+        <Route path="/stats" element={<StatsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

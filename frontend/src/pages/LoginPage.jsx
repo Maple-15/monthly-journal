@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { BookOpen, Lock, User } from 'lucide-react'
 import { api, setToken, setUsername } from '../api'
 
 export default function LoginPage({ onLogin }) {
@@ -31,7 +32,9 @@ export default function LoginPage({ onLogin }) {
       <div className="w-full max-w-sm">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
           <div className="text-center mb-8">
-            <div className="text-4xl mb-2">📖</div>
+            <div className="w-14 h-14 mx-auto mb-3 bg-primary-100 rounded-2xl flex items-center justify-center">
+              <BookOpen size={26} className="text-primary-600" />
+            </div>
             <h1 className="text-xl font-bold text-gray-800">时间手账</h1>
             <p className="text-sm text-gray-400 mt-1">月视图 · 时间记录</p>
           </div>
@@ -39,25 +42,31 @@ export default function LoginPage({ onLogin }) {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm text-gray-500 mb-1">用户名</label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsernameField(e.target.value)}
-                placeholder="请输入用户名"
-                autoComplete="username"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
-              />
+              <div className="relative">
+                <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsernameField(e.target.value)}
+                  placeholder="请输入用户名"
+                  autoComplete="username"
+                  className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                />
+              </div>
             </div>
             <div>
               <label className="block text-sm text-gray-500 mb-1">密码</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="请输入密码"
-                autoComplete="current-password"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
-              />
+              <div className="relative">
+                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="请输入密码"
+                  autoComplete="current-password"
+                  className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                />
+              </div>
             </div>
 
             {error && (

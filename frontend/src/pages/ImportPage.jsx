@@ -65,7 +65,7 @@ export default function ImportPage() {
         <div className={`rounded-xl p-4 border ${result.ok ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
           {result.ok ? (
             <div>
-              <div className="font-medium text-green-700 mb-1">✅ 导入成功</div>
+              <div className="font-medium text-green-700 mb-1">导入成功</div>
               <div className="text-sm text-green-600">成功导入 {result.imported} 条记录</div>
               {result.total_errors > 0 && (
                 <div className="text-sm text-yellow-600 mt-1">
@@ -75,7 +75,7 @@ export default function ImportPage() {
             </div>
           ) : (
             <div>
-              <div className="font-medium text-red-700 mb-1">❌ 导入失败</div>
+              <div className="font-medium text-red-700 mb-1">导入失败</div>
               <div className="text-sm text-red-600">{result.error || '未知错误'}</div>
             </div>
           )}
@@ -84,7 +84,7 @@ export default function ImportPage() {
 
       {/* 使用提示 */}
       <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-        <h4 className="text-sm font-medium text-blue-700 mb-1">💡 提示</h4>
+        <h4 className="text-sm font-medium text-blue-700 mb-1">使用提示</h4>
         <ul className="text-xs text-blue-600 space-y-1">
           <li>• 上传的 Excel 需要包含名为「时间明细」的 Sheet</li>
           <li>• 列顺序需为：年、月、周、日期、主类、次类、备注、开始时间、结束时间、持续时间</li>

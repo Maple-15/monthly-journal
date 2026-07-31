@@ -101,6 +101,16 @@ def init_db():
         )
     """))
 
+    # 清理重复分类：同一父类下同名次类只保留 id 最小的一条
+    # （早期版本 INSERT OR IGNORE 无唯一约束导致重复插入，这里兜底修复）
+    conn.execute(text("""
+        DELETE FROM categories
+        WHERE id NOT IN (
+            SELECT MIN(id) FROM categories GROUP BY name, COALESCE(parent_id, -1)
+        )
+    """))
+    conn.commit()
+
     # 旧数据库兼容：time_entries 补 user_id 列
     _ensure_column(conn, "time_entries", "user_id", "INTEGER NOT NULL DEFAULT 1")
 
@@ -109,43 +119,39 @@ def init_db():
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_entries_main_cat ON time_entries(main_category)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_entries_user ON time_entries(user_id)"))
 
-    # 检查是否已有默认分类
-    has_cats = conn.execute(text("SELECT COUNT(*) FROM categories")).scalar()
+    # 确保 7 大主类存在（幂等，缺失才补）
+    main_names = ['工作', '学习', '运动', '阅读', '娱乐', '休息', '社交']
+    for i, name in enumerate(main_names, start=1):
+        exists = conn.execute(
+            text("SELECT id FROM categories WHERE name = :n AND parent_id IS NULL"),
+            {"n": name}
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                text("INSERT INTO categories(name, parent_id, sort_order) VALUES (:n, NULL, :so)"),
+                {"n": name, "so": i}
+            )
 
-    if has_cats == 0:
-        # 插入主类
-        if is_sqlite():
-            conn.execute(text("INSERT INTO categories(id, name, parent_id, sort_order) VALUES (1, '工作', NULL, 1)"))
-            conn.execute(text("INSERT INTO categories(id, name, parent_id, sort_order) VALUES (2, '学习', NULL, 2)"))
-            conn.execute(text("INSERT INTO categories(id, name, parent_id, sort_order) VALUES (3, '运动', NULL, 3)"))
-            conn.execute(text("INSERT INTO categories(id, name, parent_id, sort_order) VALUES (4, '阅读', NULL, 4)"))
-            conn.execute(text("INSERT INTO categories(id, name, parent_id, sort_order) VALUES (5, '娱乐', NULL, 5)"))
-            conn.execute(text("INSERT INTO categories(id, name, parent_id, sort_order) VALUES (6, '休息', NULL, 6)"))
-            conn.execute(text("INSERT INTO categories(id, name, parent_id, sort_order) VALUES (7, '社交', NULL, 7)"))
-        else:
-            conn.execute(text("INSERT INTO categories(name, parent_id, sort_order) VALUES ('工作', NULL, 1)"))
-            conn.execute(text("INSERT INTO categories(name, parent_id, sort_order) VALUES ('学习', NULL, 2)"))
-            conn.execute(text("INSERT INTO categories(name, parent_id, sort_order) VALUES ('运动', NULL, 3)"))
-            conn.execute(text("INSERT INTO categories(name, parent_id, sort_order) VALUES ('阅读', NULL, 4)"))
-            conn.execute(text("INSERT INTO categories(name, parent_id, sort_order) VALUES ('娱乐', NULL, 5)"))
-            conn.execute(text("INSERT INTO categories(name, parent_id, sort_order) VALUES ('休息', NULL, 6)"))
-            conn.execute(text("INSERT INTO categories(name, parent_id, sort_order) VALUES ('社交', NULL, 7)"))
-
-        # 插入次类
-        subs = [
-            ('开发', '工作'), ('会议', '工作'), ('文档', '工作'), ('生产', '工作'), ('需求分析', '工作'),
-            ('Python', '学习'), ('系统设计', '学习'), ('英语', '学习'), ('工具', '学习'),
-            ('跑步', '运动'), ('力量训练', '运动'), ('瑜伽', '运动'), ('游泳', '运动'),
-            ('专业书籍', '阅读'), ('文学', '阅读'), ('个人成长', '阅读'),
-            ('刷剧', '娱乐'), ('游戏', '娱乐'), ('音乐', '娱乐'), ('小说', '娱乐'),
-            ('午休', '休息'), ('散步', '休息'), ('冥想', '休息'),
-            ('聚餐', '社交'), ('聊天', '社交'), ('活动', '社交'),
-        ]
-        for sub_name, parent_name in subs:
-            pid = conn.execute(
-                text("SELECT id FROM categories WHERE name = :pn AND parent_id IS NULL"),
-                {"pn": parent_name}
-            ).scalar_one()
+    # 确保默认次类存在（幂等，按名称检查）
+    subs = [
+        ('开发', '工作'), ('会议', '工作'), ('文档', '工作'), ('生产', '工作'), ('需求分析', '工作'),
+        ('Python', '学习'), ('系统设计', '学习'), ('英语', '学习'), ('工具', '学习'),
+        ('跑步', '运动'), ('力量训练', '运动'), ('瑜伽', '运动'), ('游泳', '运动'),
+        ('专业书籍', '阅读'), ('文学', '阅读'), ('个人成长', '阅读'),
+        ('刷剧', '娱乐'), ('游戏', '娱乐'), ('音乐', '娱乐'), ('小说', '娱乐'),
+        ('午休', '休息'), ('散步', '休息'), ('冥想', '休息'),
+        ('聚餐', '社交'), ('聊天', '社交'), ('活动', '社交'),
+    ]
+    for sub_name, parent_name in subs:
+        pid = conn.execute(
+            text("SELECT id FROM categories WHERE name = :pn AND parent_id IS NULL"),
+            {"pn": parent_name}
+        ).scalar_one()
+        exists = conn.execute(
+            text("SELECT id FROM categories WHERE name = :n AND parent_id = :pid"),
+            {"n": sub_name, "pid": pid}
+        ).fetchone()
+        if not exists:
             conn.execute(
                 text("INSERT INTO categories(name, parent_id) VALUES (:n, :pid)"),
                 {"n": sub_name, "pid": pid}

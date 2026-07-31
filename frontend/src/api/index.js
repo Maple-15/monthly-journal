@@ -64,6 +64,11 @@ export const api = {
     return request(`/entries/monthly?year=${year}&month=${month}`)
   },
 
+  // 年度数据（热力图）
+  getYear(year) {
+    return request(`/entries/year?year=${year}`)
+  },
+
   // 每日数据
   getDaily(date) {
     return request(`/entries/daily/${date}`)

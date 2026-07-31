@@ -78,6 +78,43 @@ def get_monthly(year: int = Query(...), month: int = Query(...), user=Depends(ge
     return {"year": year, "month": month, "days": result}
 
 
+@router.get("/year")
+def get_year(year: int = Query(...), user=Depends(get_current_user)):
+    """获取某年全部记录（按天分组），供年度热力图使用"""
+    conn = get_db()
+    prefix = f"{year}-"
+    rows = conn.execute(
+        text("SELECT * FROM time_entries WHERE user_id = :uid AND date LIKE :prefix ORDER BY date, start_time"),
+        {"uid": user["id"], "prefix": f"{prefix}%"}
+    ).mappings().all()
+    conn.close()
+
+    days = {}
+    for r in rows:
+        d = r["date"]
+        if d not in days:
+            days[d] = []
+        days[d].append({
+            "id": r["id"],
+            "main_category": r["main_category"],
+            "sub_category": r["sub_category"],
+            "note": r["note"],
+            "start_time": r["start_time"],
+            "end_time": r["end_time"],
+            "duration_minutes": r["duration_minutes"],
+        })
+
+    result = []
+    for date, entries in sorted(days.items()):
+        result.append({
+            "date": date,
+            "total_minutes": round(sum(e["duration_minutes"] for e in entries), 1),
+            "entries": entries,
+        })
+
+    return {"year": year, "days": result}
+
+
 @router.get("/daily/{date}")
 def get_daily(date: str, user=Depends(get_current_user)):
     conn = get_db()

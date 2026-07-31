@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { ChevronLeft, ChevronRight, Zap, Pencil, Trash2, X } from 'lucide-react'
 import { api } from '../api'
 
 // 类别颜色映射
@@ -10,6 +12,16 @@ const CAT_COLORS = {
   '娱乐': 'bg-pink-100 text-pink-700',
   '休息': 'bg-teal-100 text-teal-700',
   '社交': 'bg-yellow-100 text-yellow-700',
+}
+
+const CAT_DOT = {
+  '工作': 'bg-blue-500',
+  '学习': 'bg-green-500',
+  '运动': 'bg-orange-500',
+  '阅读': 'bg-purple-500',
+  '娱乐': 'bg-pink-500',
+  '休息': 'bg-teal-500',
+  '社交': 'bg-yellow-500',
 }
 
 function formatMinutes(m) {
@@ -29,13 +41,26 @@ function formatMinutesShort(m) {
   return `${h}h${min > 0 ? min : ''}`
 }
 
+function minutesAgo(mins) {
+  const d = new Date(Date.now() - mins * 60000)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export default function MonthlyView() {
+  const navigate = useNavigate()
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [selectedDate, setSelectedDate] = useState(null)
+  const [toast, setToast] = useState('')
+  const [quickCats, setQuickCats] = useState([])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -52,11 +77,61 @@ export default function MonthlyView() {
     fetchData()
   }, [fetchData])
 
+  // 统计常用活动（当月高频主类+次类组合，Top 4）
+  useEffect(() => {
+    if (!data || !data.days) return
+    const freq = {}
+    for (const d of data.days) {
+      for (const e of d.entries) {
+        const key = `${e.main_category}|${e.sub_category}`
+        freq[key] = (freq[key] || 0) + 1
+      }
+    }
+    const sorted = Object.entries(freq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([key]) => {
+        const [main, sub] = key.split('|')
+        return { main, sub }
+      })
+    setQuickCats(sorted)
+  }, [data])
+
+  // 一键记录 1 小时
+  const quickRecord = async (main, sub) => {
+    try {
+      await api.createEntry({
+        date: todayStr(),
+        main_category: main,
+        sub_category: sub,
+        note: '',
+        start_time: minutesAgo(60),
+        end_time: minutesAgo(0),
+      })
+      setToast(`已记录：${main}-${sub} 1小时`)
+      fetchData()
+      setTimeout(() => setToast(''), 2500)
+    } catch (e) {
+      alert('记录失败: ' + e.message)
+    }
+  }
+
+  // 删除条目
+  const handleDelete = async (entryId) => {
+    if (!window.confirm('确定删除这条记录吗？')) return
+    try {
+      await api.deleteEntry(entryId)
+      setSelectedDate(null)
+      fetchData()
+    } catch (e) {
+      alert('删除失败: ' + e.message)
+    }
+  }
+
   const daysInMonth = new Date(year, month, 0).getDate()
   const firstDay = new Date(year, month - 1, 1).getDay() // 0=Sun
   const weekDays = ['日', '一', '二', '三', '四', '五', '六']
 
-  // 构建日期 -> 数据映射
   const dayMap = {}
   if (data) {
     for (const d of data.days) {
@@ -66,35 +141,32 @@ export default function MonthlyView() {
 
   const prevMonth = () => {
     if (month === 1) {
-      setYear(y => y - 1)
+      setYear((y) => y - 1)
       setMonth(12)
     } else {
-      setMonth(m => m - 1)
+      setMonth((m) => m - 1)
     }
   }
 
   const nextMonth = () => {
     if (month === 12) {
-      setYear(y => y + 1)
+      setYear((y) => y + 1)
       setMonth(1)
     } else {
-      setMonth(m => m + 1)
+      setMonth((m) => m + 1)
     }
   }
 
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const todayStrValue = todayStr()
 
-  // 生成日历格子
   const cells = []
-  // 空白填充
   for (let i = 0; i < firstDay; i++) {
     cells.push(<div key={`empty-${i}`} className="min-h-[60px] sm:min-h-[80px]" />)
   }
-  // 日期
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     const dayData = dayMap[dateStr]
-    const isToday = dateStr === todayStr
+    const isToday = dateStr === todayStrValue
     const isSelected = dateStr === selectedDate
 
     cells.push(
@@ -130,10 +202,8 @@ export default function MonthlyView() {
     )
   }
 
-  // 选中日期的详情
   const selectedDayData = selectedDate ? dayMap[selectedDate] : null
 
-  // 月度统计
   let totalMinutes = 0
   const catTotals = {}
   if (data) {
@@ -147,10 +217,39 @@ export default function MonthlyView() {
 
   return (
     <div>
+      {/* 提示条 */}
+      {toast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-30 bg-gray-800 text-white text-sm px-4 py-2 rounded-full shadow-lg">
+          {toast}
+        </div>
+      )}
+
+      {/* 常用活动快捷记录 */}
+      {quickCats.length > 0 && (
+        <div className="bg-white rounded-xl p-3 mb-4 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-2">
+            <Zap size={13} />
+            常用活动 · 点一下直接记录 1 小时
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {quickCats.map((q) => (
+              <button
+                key={`${q.main}-${q.sub}`}
+                onClick={() => quickRecord(q.main, q.sub)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border border-gray-200 bg-gray-50 hover:bg-primary-50 hover:border-primary-300 hover:text-primary-700 transition-colors"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${CAT_DOT[q.main] || 'bg-gray-400'}`} />
+                {q.main}-{q.sub}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 月份导航 */}
       <div className="flex items-center justify-between mb-4">
-        <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-lg text-lg">
-          ◀
+        <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-lg">
+          <ChevronLeft size={20} className="text-gray-500" />
         </button>
         <div className="flex items-center gap-3">
           <select
@@ -164,8 +263,8 @@ export default function MonthlyView() {
           </select>
           <span className="text-lg font-bold">{month}月</span>
         </div>
-        <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-lg text-lg">
-          ▶
+        <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-lg">
+          <ChevronRight size={20} className="text-gray-500" />
         </button>
       </div>
 
@@ -188,7 +287,6 @@ export default function MonthlyView() {
         <div className="flex justify-center py-12 text-gray-400">加载中...</div>
       ) : (
         <>
-          {/* 星期头 */}
           <div className="calendar-grid mb-1">
             {weekDays.map((wd) => (
               <div key={wd} className="text-center text-xs sm:text-sm font-medium text-gray-400 py-1">
@@ -200,45 +298,61 @@ export default function MonthlyView() {
         </>
       )}
 
-      {/* 选中日期的详情弹窗 */}
-      {selectedDate && selectedDayData && (
+      {/* 选中日期详情抽屉 */}
+      {selectedDate && (
         <div className="fixed inset-0 bg-black/30 z-20 flex items-end sm:items-center justify-center" onClick={() => setSelectedDate(null)}>
           <div
-            className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[70vh] overflow-y-auto p-4 sm:m-4"
+            className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[75vh] overflow-y-auto p-4 sm:m-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-lg">{selectedDate}</h3>
-              <span className="text-sm text-gray-400">
-                合计 {formatMinutesShort(selectedDayData.total_minutes)}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-400">
+                  合计 {selectedDayData ? formatMinutesShort(selectedDayData.total_minutes) : ''}
+                </span>
+                <button onClick={() => setSelectedDate(null)} className="p-1 hover:bg-gray-100 rounded-lg">
+                  <X size={18} className="text-gray-400" />
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              {selectedDayData.entries.map((entry) => (
-                <div key={entry.id} className="flex items-start gap-2 p-2 bg-gray-50 rounded-lg">
-                  <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
-                    entry.main_category === '工作' ? 'bg-blue-500' :
-                    entry.main_category === '学习' ? 'bg-green-500' :
-                    entry.main_category === '运动' ? 'bg-orange-500' :
-                    entry.main_category === '阅读' ? 'bg-purple-500' :
-                    entry.main_category === '娱乐' ? 'bg-pink-500' :
-                    entry.main_category === '休息' ? 'bg-teal-500' : 'bg-yellow-500'
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{entry.sub_category}</span>
-                      <span className="text-xs text-gray-400">{entry.main_category}</span>
+            {selectedDayData && selectedDayData.entries.length > 0 ? (
+              <div className="space-y-2">
+                {selectedDayData.entries.map((entry) => (
+                  <div key={entry.id} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded-lg">
+                    <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${CAT_DOT[entry.main_category] || 'bg-gray-400'}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{entry.sub_category}</span>
+                        <span className="text-xs text-gray-400">{entry.main_category}</span>
+                      </div>
+                      {entry.note && <div className="text-xs text-gray-500 truncate">{entry.note}</div>}
+                      <div className="text-xs text-gray-400">
+                        {entry.start_time} - {entry.end_time}
+                        <span className="ml-2">{formatMinutesShort(entry.duration_minutes)}</span>
+                      </div>
                     </div>
-                    {entry.note && <div className="text-xs text-gray-500 truncate">{entry.note}</div>}
-                    <div className="text-xs text-gray-400">
-                      {entry.start_time} - {entry.end_time}
-                      <span className="ml-2">{formatMinutesShort(entry.duration_minutes)}</span>
+                    <div className="flex flex-col gap-1 shrink-0">
+                      <button
+                        onClick={() => navigate(`/edit/${entry.id}`)}
+                        className="p-1.5 hover:bg-white rounded-lg text-gray-400 hover:text-primary-600 transition-colors"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(entry.id)}
+                        className="p-1.5 hover:bg-white rounded-lg text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-gray-400 py-8 text-sm">这一天没有记录</div>
+            )}
 
             <button
               onClick={() => setSelectedDate(null)}
