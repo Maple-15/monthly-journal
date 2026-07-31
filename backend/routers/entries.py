@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta
 from sqlalchemy import text
 from ..database import get_db
+from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/entries", tags=["entries"])
 
@@ -36,12 +37,12 @@ def calc_duration(start: str, end: str) -> float:
 
 
 @router.get("/monthly")
-def get_monthly(year: int = Query(...), month: int = Query(...)):
+def get_monthly(year: int = Query(...), month: int = Query(...), user=Depends(get_current_user)):
     conn = get_db()
     prefix = f"{year}-{month:02d}"
     rows = conn.execute(
-        text("SELECT * FROM time_entries WHERE date LIKE :prefix ORDER BY date, start_time"),
-        {"prefix": f"{prefix}%"}
+        text("SELECT * FROM time_entries WHERE user_id = :uid AND date LIKE :prefix ORDER BY date, start_time"),
+        {"uid": user["id"], "prefix": f"{prefix}%"}
     ).mappings().all()
     conn.close()
 
@@ -78,11 +79,11 @@ def get_monthly(year: int = Query(...), month: int = Query(...)):
 
 
 @router.get("/daily/{date}")
-def get_daily(date: str):
+def get_daily(date: str, user=Depends(get_current_user)):
     conn = get_db()
     rows = conn.execute(
-        text("SELECT * FROM time_entries WHERE date = :date ORDER BY start_time"),
-        {"date": date}
+        text("SELECT * FROM time_entries WHERE user_id = :uid AND date = :date ORDER BY start_time"),
+        {"uid": user["id"], "date": date}
     ).mappings().all()
     conn.close()
 
@@ -92,15 +93,16 @@ def get_daily(date: str):
 
 
 @router.post("")
-def create_entry(entry: EntryCreate):
+def create_entry(entry: EntryCreate, user=Depends(get_current_user)):
     minutes = calc_duration(entry.start_time, entry.end_time)
     conn = get_db()
 
     result = conn.execute(
-        text("""INSERT INTO time_entries (date, main_category, sub_category, note, start_time, end_time, duration_minutes)
-                VALUES (:date, :main_cat, :sub_cat, :note, :start, :end, :dur) RETURNING id"""),
+        text("""INSERT INTO time_entries (user_id, date, main_category, sub_category, note, start_time, end_time, duration_minutes)
+                VALUES (:uid, :date, :main_cat, :sub_cat, :note, :start, :end, :dur) RETURNING id"""),
         {
-            "date": entry.date, "main_cat": entry.main_category,
+            "uid": user["id"], "date": entry.date,
+            "main_cat": entry.main_category,
             "sub_cat": entry.sub_category, "note": entry.note,
             "start": entry.start_time, "end": entry.end_time,
             "dur": minutes
@@ -110,17 +112,19 @@ def create_entry(entry: EntryCreate):
     conn.commit()
 
     row = conn.execute(
-        text("SELECT * FROM time_entries WHERE id = :id"), {"id": new_id}
+        text("SELECT * FROM time_entries WHERE id = :id AND user_id = :uid"),
+        {"id": new_id, "uid": user["id"]}
     ).mappings().fetchone()
     conn.close()
     return {"ok": True, "entry": dict(row)}
 
 
 @router.put("/{entry_id}")
-def update_entry(entry_id: int, update: EntryUpdate):
+def update_entry(entry_id: int, update: EntryUpdate, user=Depends(get_current_user)):
     conn = get_db()
     existing = conn.execute(
-        text("SELECT * FROM time_entries WHERE id = :id"), {"id": entry_id}
+        text("SELECT * FROM time_entries WHERE id = :id AND user_id = :uid"),
+        {"id": entry_id, "uid": user["id"]}
     ).mappings().fetchone()
     if not existing:
         conn.close()
@@ -139,30 +143,39 @@ def update_entry(entry_id: int, update: EntryUpdate):
 
     if fields:
         set_clauses = ", ".join(f"{k} = :{k}" for k in fields)
-        params = {**fields, "id": entry_id}
-        conn.execute(text(f"UPDATE time_entries SET {set_clauses} WHERE id = :id"), params)
+        params = {**fields, "id": entry_id, "uid": user["id"]}
+        conn.execute(
+            text(f"UPDATE time_entries SET {set_clauses} WHERE id = :id AND user_id = :uid"),
+            params
+        )
         conn.commit()
 
     row = conn.execute(
-        text("SELECT * FROM time_entries WHERE id = :id"), {"id": entry_id}
+        text("SELECT * FROM time_entries WHERE id = :id AND user_id = :uid"),
+        {"id": entry_id, "uid": user["id"]}
     ).mappings().fetchone()
     conn.close()
     return {"ok": True, "entry": dict(row)}
 
 
 @router.delete("/{entry_id}")
-def delete_entry(entry_id: int):
+def delete_entry(entry_id: int, user=Depends(get_current_user)):
     conn = get_db()
-    conn.execute(text("DELETE FROM time_entries WHERE id = :id"), {"id": entry_id})
+    conn.execute(
+        text("DELETE FROM time_entries WHERE id = :id AND user_id = :uid"),
+        {"id": entry_id, "uid": user["id"]}
+    )
     conn.commit()
     conn.close()
     return {"ok": True}
 
 
 @router.delete("")
-def clear_all():
+def clear_all(user=Depends(get_current_user)):
     conn = get_db()
-    conn.execute(text("DELETE FROM time_entries"))
+    conn.execute(
+        text("DELETE FROM time_entries WHERE user_id = :uid"), {"uid": user["id"]}
+    )
     conn.commit()
     conn.close()
     return {"ok": True}

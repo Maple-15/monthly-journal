@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from .database import init_db
+from .auth import router as auth_router
 from .routers import entries, categories, import_data
 
 app = FastAPI(title="月视图时间记录手账", version="1.0.0")
@@ -16,6 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(entries.router)
 app.include_router(categories.router)
 app.include_router(import_data.router)

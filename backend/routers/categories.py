@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import text
 from ..database import get_db
+from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
 
@@ -18,7 +19,7 @@ class CategoryUpdate(BaseModel):
 
 
 @router.get("")
-def get_categories():
+def get_categories(user=Depends(get_current_user)):
     conn = get_db()
     rows = conn.execute(
         text("SELECT * FROM categories ORDER BY sort_order, id")
@@ -43,7 +44,7 @@ def get_categories():
 
 
 @router.post("")
-def create_category(cat: CategoryCreate):
+def create_category(cat: CategoryCreate, user=Depends(get_current_user)):
     conn = get_db()
     if cat.parent_id:
         parent = conn.execute(
@@ -68,7 +69,7 @@ def create_category(cat: CategoryCreate):
 
 
 @router.put("/{cat_id}")
-def update_category(cat_id: int, update: CategoryUpdate):
+def update_category(cat_id: int, update: CategoryUpdate, user=Depends(get_current_user)):
     conn = get_db()
     existing = conn.execute(
         text("SELECT * FROM categories WHERE id = :id"), {"id": cat_id}
@@ -96,7 +97,7 @@ def update_category(cat_id: int, update: CategoryUpdate):
 
 
 @router.delete("/{cat_id}")
-def delete_category(cat_id: int):
+def delete_category(cat_id: int, user=Depends(get_current_user)):
     conn = get_db()
     conn.execute(text("DELETE FROM categories WHERE id = :id"), {"id": cat_id})
     conn.execute(text("DELETE FROM categories WHERE parent_id = :pid"), {"pid": cat_id})

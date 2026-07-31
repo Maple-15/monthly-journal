@@ -1,10 +1,48 @@
 const BASE = '/api'
 
+// token 管理
+export function getToken() {
+  return localStorage.getItem('journal_token')
+}
+
+export function setToken(token) {
+  localStorage.setItem('journal_token', token)
+}
+
+export function getUsername() {
+  return localStorage.getItem('journal_username') || ''
+}
+
+export function setUsername(name) {
+  localStorage.setItem('journal_username', name)
+}
+
+export function clearAuth() {
+  localStorage.removeItem('journal_token')
+  localStorage.removeItem('journal_username')
+}
+
+export function isLoggedIn() {
+  return Boolean(getToken())
+}
+
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  })
+  const headers = { 'Content-Type': 'application/json', ...options.headers }
+  const token = getToken()
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const res = await fetch(`${BASE}${path}`, { ...options, headers })
+
+  if (res.status === 401) {
+    clearAuth()
+    if (!path.startsWith('/auth/')) {
+      window.location.href = '/'
+    }
+    throw new Error('登录已过期，请重新登录')
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.detail || `请求失败: ${res.status}`)
@@ -13,6 +51,14 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // 登录
+  login(username, password) {
+    return request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+  },
+
   // 月度数据
   getMonthly(year, month) {
     return request(`/entries/monthly?year=${year}&month=${month}`)
@@ -69,8 +115,22 @@ export const api = {
   importExcel(file) {
     const form = new FormData()
     form.append('file', file)
-    return fetch(`${BASE}/import/excel`, { method: 'POST', body: form }).then(
-      (r) => r.json()
-    )
+    const headers = {}
+    const token = getToken()
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+    return fetch(`${BASE}/import/excel`, {
+      method: 'POST',
+      headers,
+      body: form,
+    }).then(async (r) => {
+      if (r.status === 401) {
+        clearAuth()
+        window.location.href = '/'
+        throw new Error('登录已过期')
+      }
+      return r.json()
+    })
   },
 }

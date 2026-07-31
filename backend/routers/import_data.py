@@ -1,8 +1,9 @@
 import openpyxl
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Depends
 from datetime import datetime, timedelta
 from sqlalchemy import text
 from ..database import get_db
+from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/import", tags=["import"])
 
@@ -32,7 +33,7 @@ def format_time(minutes):
 
 
 @router.post("/excel")
-async def import_excel(file: UploadFile = File(...)):
+async def import_excel(file: UploadFile = File(...), user=Depends(get_current_user)):
     if not file.filename.endswith((".xlsx", ".xls")):
         return {"ok": False, "error": "请上传 .xlsx 或 .xls 文件"}
 
@@ -101,10 +102,11 @@ async def import_excel(file: UploadFile = File(...)):
 
         try:
             conn.execute(
-                text("""INSERT INTO time_entries (date, main_category, sub_category, note, start_time, end_time, duration_minutes)
-                       VALUES (:date, :main_cat, :sub_cat, :note, :start, :end, :dur)"""),
+                text("""INSERT INTO time_entries (user_id, date, main_category, sub_category, note, start_time, end_time, duration_minutes)
+                       VALUES (:uid, :date, :main_cat, :sub_cat, :note, :start, :end, :dur)"""),
                 {
-                    "date": date_str, "main_cat": main_cat,
+                    "uid": user["id"], "date": date_str,
+                    "main_cat": main_cat,
                     "sub_cat": sub_cat, "note": note,
                     "start": start_str, "end": end_str, "dur": minutes
                 }

@@ -1,4 +1,6 @@
 import os
+import socket
+from urllib.parse import urlparse, urlunparse
 from sqlalchemy import create_engine, text, inspect
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -9,7 +11,45 @@ if not DATABASE_URL:
     DB_DIR = os.path.dirname(os.path.abspath(__file__))
     DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'journal.db')}"
 
-engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+
+def _force_ipv4(db_url: str) -> str:
+    """解决 Render 不支持 IPv6、而 Supabase 优先解析 IPv6 的问题：
+    把连接串中的主机名替换为 IPv4 地址。"""
+    try:
+        parsed = urlparse(db_url)
+        if not parsed.hostname or not parsed.scheme.startswith("postgres"):
+            return db_url
+
+        # 尝试解析 IPv4 地址
+        infos = socket.getaddrinfo(parsed.hostname, None, socket.AF_INET)
+        ipv4_host = infos[0][4][0]
+        if not ipv4_host:
+            return db_url
+
+        # 重建 netloc：user:pass@ipv4:port
+        netloc = ""
+        if parsed.username:
+            netloc += parsed.username
+            if parsed.password:
+                netloc += ":" + parsed.password
+            netloc += "@"
+        netloc += ipv4_host
+        if parsed.port:
+            netloc += f":{parsed.port}"
+
+        return urlunparse(parsed._replace(netloc=netloc))
+    except Exception:
+        # 解析失败就返回原样，让 SQLAlchemy 自己处理
+        return db_url
+
+
+DATABASE_URL = _force_ipv4(DATABASE_URL)
+
+# Supabase 要求 SSL 连接；本地 SQLite 不需要
+engine_kwargs = {"echo": False, "pool_pre_ping": True}
+if DATABASE_URL.startswith("postgres"):
+    engine_kwargs["connect_args"] = {"sslmode": "require"}
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 
 def get_db():
@@ -39,6 +79,7 @@ def init_db():
     conn.execute(text(f"""
         CREATE TABLE IF NOT EXISTS time_entries (
             id {_auto()},
+            user_id INTEGER NOT NULL DEFAULT 1,
             date VARCHAR(10) NOT NULL,
             main_category VARCHAR(50) NOT NULL,
             sub_category VARCHAR(50) NOT NULL,
@@ -50,9 +91,23 @@ def init_db():
         )
     """))
 
+    # users 表
+    conn.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS users (
+            id {_auto()},
+            username VARCHAR(50) NOT NULL UNIQUE,
+            password_hash VARCHAR(200) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+
+    # 旧数据库兼容：time_entries 补 user_id 列
+    _ensure_column(conn, "time_entries", "user_id", "INTEGER NOT NULL DEFAULT 1")
+
     # 索引
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_entries_date ON time_entries(date)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_entries_main_cat ON time_entries(main_category)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_entries_user ON time_entries(user_id)"))
 
     # 检查是否已有默认分类
     has_cats = conn.execute(text("SELECT COUNT(*) FROM categories")).scalar()
@@ -96,6 +151,53 @@ def init_db():
                 {"n": sub_name, "pid": pid}
             )
 
+    conn.commit()
+    conn.close()
+
+    # 从环境变量创建预置账号
+    _seed_users()
+
+
+def _ensure_column(conn, table: str, column: str, ddl: str):
+    """检查列是否存在，不存在则 ALTER TABLE 添加（兼容旧数据库）"""
+    try:
+        insp = inspect(conn)
+        cols = [c["name"] for c in insp.get_columns(table)]
+    except Exception:
+        return
+    if column not in cols:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+        conn.commit()
+
+
+def _seed_users():
+    """从 APP_USERS 环境变量创建预置账号，格式：user1:pass1,user2:pass2"""
+    from .auth import hash_password
+
+    raw = os.environ.get("APP_USERS", "").strip()
+    if not raw:
+        return
+
+    conn = get_db()
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        username, password = pair.split(":", 1)
+        username = username.strip()
+        if not username:
+            continue
+
+        existing = conn.execute(
+            text("SELECT id FROM users WHERE username = :u"), {"u": username}
+        ).fetchone()
+        if existing:
+            continue
+
+        conn.execute(
+            text("INSERT INTO users (username, password_hash) VALUES (:u, :h)"),
+            {"u": username, "h": hash_password(password)}
+        )
     conn.commit()
     conn.close()
 
