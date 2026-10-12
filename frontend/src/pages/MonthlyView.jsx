@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Zap, Pencil, Trash2, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Zap, Pencil, Trash2, X, AlertTriangle, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 
 // 类别颜色映射
@@ -58,6 +58,7 @@ export default function MonthlyView() {
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [selectedDate, setSelectedDate] = useState(null)
   const [toast, setToast] = useState('')
   const [quickCats, setQuickCats] = useState([])
@@ -67,8 +68,10 @@ export default function MonthlyView() {
     try {
       const res = await api.getMonthly(year, month)
       setData(res)
+      setLoadError('')
     } catch (e) {
       console.error(e)
+      setLoadError(e.message || '加载失败')
     }
     setLoading(false)
   }, [year, month])
@@ -221,6 +224,25 @@ export default function MonthlyView() {
       {toast && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-30 bg-gray-800 text-white text-sm px-4 py-2 rounded-full shadow-lg">
           {toast}
+        </div>
+      )}
+
+      {/* 加载失败提示：明确区分「连不上云端」和「真的没有数据」 */}
+      {loadError && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+          <AlertTriangle size={16} className="text-red-500 mt-0.5 shrink-0" />
+          <div className="flex-1 text-sm text-red-700">
+            <div className="font-medium">数据加载失败，不是记录丢了</div>
+            <div className="text-red-600/80 text-xs mt-0.5">
+              云端数据库暂时连不上（{loadError}）。稍后重试即可，已保存的记录不会消失。
+            </div>
+            <button
+              onClick={fetchData}
+              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 border border-red-300 hover:bg-red-100 px-2.5 py-1 rounded-md transition-colors"
+            >
+              <RefreshCw size={12} /> 重新加载
+            </button>
+          </div>
         </div>
       )}
 

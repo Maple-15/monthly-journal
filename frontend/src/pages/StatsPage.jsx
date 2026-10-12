@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
-import { TrendingUp, TrendingDown, CalendarDays } from 'lucide-react'
+import { TrendingUp, TrendingDown, CalendarDays, AlertTriangle, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 
 const CAT_COLORS = {
@@ -45,13 +45,20 @@ export default function StatsPage() {
   const [monthData, setMonthData] = useState(null)
   const [tab, setTab] = useState('month')
   const [heatHover, setHeatHover] = useState(null)
+  const [err, setErr] = useState('')
+
+  const reload = () => {
+    setErr('')
+    api.getYear(year).then(setYearData).catch((e) => { console.error(e); setErr(e.message || '加载失败') })
+    api.getMonthly(year, month).then(setMonthData).catch((e) => { console.error(e); setErr(e.message || '加载失败') })
+  }
 
   useEffect(() => {
-    api.getYear(year).then(setYearData).catch(console.error)
+    api.getYear(year).then((d) => { setYearData(d); setErr('') }).catch((e) => { console.error(e); setErr(e.message || '加载失败') })
   }, [year])
 
   useEffect(() => {
-    api.getMonthly(year, month).then(setMonthData).catch(console.error)
+    api.getMonthly(year, month).then((d) => { setMonthData(d); setErr('') }).catch((e) => { console.error(e); setErr(e.message || '加载失败') })
   }, [year, month])
 
   // 全年每天的总分钟映射
@@ -171,6 +178,25 @@ export default function StatsPage() {
 
   return (
     <div className="space-y-4">
+      {/* 加载失败提示 */}
+      {err && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+          <AlertTriangle size={16} className="text-red-500 mt-0.5 shrink-0" />
+          <div className="flex-1 text-sm text-red-700">
+            <div className="font-medium">统计数据加载失败，不是记录丢了</div>
+            <div className="text-red-600/80 text-xs mt-0.5">
+              云端数据库暂时连不上（{err}）。稍后重试即可。
+            </div>
+            <button
+              onClick={reload}
+              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 border border-red-300 hover:bg-red-100 px-2.5 py-1 rounded-md transition-colors"
+            >
+              <RefreshCw size={12} /> 重新加载
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Tab 切换 */}
       <div className="flex bg-white rounded-xl p-1 border border-gray-100 shadow-sm">
         {[
