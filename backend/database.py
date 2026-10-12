@@ -48,7 +48,8 @@ DATABASE_URL = _force_ipv4(DATABASE_URL)
 # Supabase 要求 SSL 连接；本地 SQLite 不需要
 engine_kwargs = {"echo": False, "pool_pre_ping": True}
 if DATABASE_URL.startswith("postgres"):
-    engine_kwargs["connect_args"] = {"sslmode": "require"}
+    # connect_timeout：数据库不通时快速失败，避免请求一直挂住
+    engine_kwargs["connect_args"] = {"sslmode": "require", "connect_timeout": 10}
 engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 
@@ -213,3 +214,46 @@ def _auto():
     if is_sqlite():
         return "INTEGER PRIMARY KEY AUTOINCREMENT"
     return "SERIAL PRIMARY KEY"
+
+
+def db_info() -> dict:
+    """数据库诊断信息，供 /api/health 排查「数据去哪了」"""
+    info = {"db_type": engine.dialect.name}
+    try:
+        parsed = urlparse(DATABASE_URL)
+        info["host"] = parsed.hostname or "local"
+        info["port"] = parsed.port
+    except Exception:
+        info["host"] = "unknown"
+
+    try:
+        conn = get_db()
+        info["entries_total"] = conn.execute(
+            text("SELECT COUNT(*) FROM time_entries")).scalar()
+        info["users_total"] = conn.execute(
+            text("SELECT COUNT(*) FROM users")).scalar()
+        info["categories_total"] = conn.execute(
+            text("SELECT COUNT(*) FROM categories")).scalar()
+
+        rows = conn.execute(text(
+            "SELECT user_id, COUNT(*) AS n, MIN(date) AS d1, MAX(date) AS d2 "
+            "FROM time_entries GROUP BY user_id ORDER BY user_id"
+        )).mappings().all()
+        info["entries_by_user"] = [
+            {"user_id": r["user_id"], "count": r["n"], "from": r["d1"], "to": r["d2"]}
+            for r in rows
+        ]
+        # 悬空数据：user_id 不对应任何账号（账号 ID 变动会导致「数据消失」）
+        info["orphan_entries"] = conn.execute(text(
+            "SELECT COUNT(*) FROM time_entries "
+            "WHERE user_id NOT IN (SELECT id FROM users)"
+        )).scalar()
+        info["user_list"] = [
+            {"id": r["id"], "username": r["username"]}
+            for r in conn.execute(text(
+                "SELECT id, username FROM users ORDER BY id")).mappings().all()
+        ]
+        conn.close()
+    except Exception as e:
+        info["error"] = f"{type(e).__name__}: {e}"[:300]
+    return info

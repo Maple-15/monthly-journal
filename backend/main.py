@@ -25,12 +25,22 @@ app.include_router(import_data.router)
 
 @app.on_event("startup")
 def startup():
-    init_db()
+    # 数据库连不上时也要让服务起来，否则连诊断接口都看不到
+    try:
+        init_db()
+        print("[startup] 数据库初始化完成", flush=True)
+    except Exception as e:
+        print(f"[startup] 数据库初始化失败: {type(e).__name__}: {e}", flush=True)
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    """健康检查 + 数据诊断（打开这个网址即可看到数据存在哪、有多少条）"""
+    from .database import db_info
+    try:
+        return {"status": "ok", **db_info()}
+    except Exception as e:
+        return {"status": "ok", "diag_error": f"{type(e).__name__}: {e}"[:200]}
 
 
 # 前端静态文件服务（生产环境）

@@ -100,6 +100,16 @@ export const api = {
     return request('/entries', { method: 'DELETE' })
   },
 
+  // 导出全部数据（备份）
+  exportAll() {
+    return request('/entries/export')
+  },
+
+  // 认领悬空的历史数据（账号 ID 变动导致数据「消失」时用）
+  recoverData() {
+    return request('/entries/recover', { method: 'POST' })
+  },
+
   // 分类
   getCategories() {
     return request('/categories')

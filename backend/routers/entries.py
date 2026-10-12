@@ -216,3 +216,39 @@ def clear_all(user=Depends(get_current_user)):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+@router.get("/export")
+def export_entries(user=Depends(get_current_user)):
+    """导出当前账号全部记录（JSON 备份）"""
+    conn = get_db()
+    rows = conn.execute(
+        text("""SELECT date, main_category, sub_category, note,
+                       start_time, end_time, duration_minutes
+                FROM time_entries WHERE user_id = :uid
+                ORDER BY date, start_time"""),
+        {"uid": user["id"]}
+    ).mappings().all()
+    conn.close()
+    return {
+        "ok": True,
+        "count": len(rows),
+        "username": user["username"],
+        "entries": [dict(r) for r in rows],
+    }
+
+
+@router.post("/recover")
+def recover_orphans(user=Depends(get_current_user)):
+    """把「悬空」的历史记录（user_id 不对应任何账号）认领到当前账号。
+    账号 ID 变动时会出现这类数据，表现为「历史数据消失」。"""
+    conn = get_db()
+    result = conn.execute(
+        text("""UPDATE time_entries SET user_id = :uid
+                WHERE user_id NOT IN (SELECT id FROM users)"""),
+        {"uid": user["id"]}
+    )
+    moved = result.rowcount or 0
+    conn.commit()
+    conn.close()
+    return {"ok": True, "moved": moved}
